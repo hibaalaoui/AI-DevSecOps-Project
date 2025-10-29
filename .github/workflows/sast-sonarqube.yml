@@ -25,8 +25,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -55,9 +53,7 @@ jobs:
         run: |
           echo "🔧 Configuring SonarQube..."
           NEW_PASS="AdminPassword123!"
-
           curl -s -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=$NEW_PASS"
-
           curl -s -u admin:$NEW_PASS -X POST "http://localhost:9000/api/projects/create?name=my-flask-app&project=my-flask-app" || true
 
           # Wait until project appears
@@ -66,7 +62,6 @@ jobs:
               echo "✅ Project confirmed."
               break
             fi
-            echo "Waiting project creation... ($i)"
             sleep 5
           done
 
@@ -75,10 +70,8 @@ jobs:
             echo "❌ Failed to generate token"
             exit 1
           fi
-
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "NEW_PASS=$NEW_PASS" >> $GITHUB_ENV
-          echo "✅ Token generated successfully"
 
       - name: Install SonarScanner
         run: |
@@ -88,7 +81,6 @@ jobs:
 
       - name: Run SonarQube Analysis
         run: |
-          echo "🚀 Starting SonarQube analysis..."
           sonar-scanner \
             -Dsonar.projectKey=my-flask-app \
             -Dsonar.projectName="My Flask App" \
@@ -97,13 +89,6 @@ jobs:
             -Dsonar.token=$SONAR_TOKEN \
             -Dsonar.python.version=3.11 \
             -Dsonar.exclusions="**/node_modules/**,**/__pycache__/**,.github/**"
-
-          EXIT_CODE=$?
-          echo "SonarScanner exit code: $EXIT_CODE"
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "❌ SonarQube analysis failed"
-            exit 1
-          fi
 
       - name: Wait for analysis to complete
         run: |
@@ -118,40 +103,24 @@ jobs:
             sleep 10
           done
 
-      - name: Download SonarQube reports
+      - name: Download SAST issues only
         run: |
           mkdir -p sonarqube-reports
-          echo "📥 Fetching SonarQube reports..."
-          
-          curl -sf -u $SONAR_TOKEN: "http://localhost:9000/api/issues/search?componentKeys=my-flask-app&ps=500" -o sonarqube-reports/issues.json
-          curl -sf -u $SONAR_TOKEN: "http://localhost:9000/api/measures/component?component=my-flask-app&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,security_hotspots,ncloc,complexity" -o sonarqube-reports/metrics.json
-          curl -sf -u $SONAR_TOKEN: "http://localhost:9000/api/qualitygates/project_status?projectKey=my-flask-app" -o sonarqube-reports/quality-gate.json
-          
-          # Validate JSON
+          echo "📥 Fetching SAST issues from SonarQube..."
+          curl -sf -u $SONAR_TOKEN: "http://localhost:9000/api/issues/search?componentKeys=my-flask-app&ps=500" \
+            -o sonarqube-reports/issues.json
           jq . sonarqube-reports/issues.json >/dev/null || { echo "❌ Invalid issues.json"; exit 1; }
-          jq . sonarqube-reports/metrics.json >/dev/null || { echo "❌ Invalid metrics.json"; exit 1; }
-          jq . sonarqube-reports/quality-gate.json >/dev/null || { echo "❌ Invalid quality-gate.json"; exit 1; }
 
-      - name: Generate HTML Report
-        run: |
-          echo "🧾 Generating HTML report..."
-          # (reuse your HTML code unchanged)
-          cat > sonarqube-reports/index.html <<'HTMLEOF'
-          <!-- Ton code HTML original inchangé -->
-          HTMLEOF
-
-      - name: Upload Reports as Artifact
+      - name: Upload SAST issues artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sonarqube-sast-report
-          path: sonarqube-reports/
+          name: sonarqube-sast-issues
+          path: sonarqube-reports/issues.json
           retention-days: 30
 
-      - name: Generate Job Summary
+      - name: Generate SAST Summary
         run: |
-          echo "# 🔍 SonarQube SAST Summary" >> $GITHUB_STEP_SUMMARY
-          QG_STATUS=$(jq -r '.projectStatus.status' sonarqube-reports/quality-gate.json)
-          echo "## Quality Gate: $QG_STATUS" >> $GITHUB_STEP_SUMMARY
-          jq -r '.component.measures[] | "- **\(.metric)**: \(.value)"' sonarqube-reports/metrics.json >> $GITHUB_STEP_SUMMARY
-          ISSUES_COUNT=$(jq '.total // (.issues | length)' sonarqube-reports/issues.json)
-          echo "## Issues Found: $ISSUES_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "# 🧩 SonarQube SAST Report" >> $GITHUB_STEP_SUMMARY
+          COUNT=$(jq '.total // (.issues | length)' sonarqube-reports/issues.json)
+          echo "## Total issues found: $COUNT" >> $GITHUB_STEP_SUMMARY
+          jq -r '.issues[] | "- **\(.severity)** \(.rule)** → \(.component):\(.line) | \(.message)"' sonarqube-reports/issues.json | head -n 20 >> $GITHUB_STEP_SUMMARY
