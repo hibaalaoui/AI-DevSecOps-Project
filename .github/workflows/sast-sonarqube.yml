@@ -73,6 +73,8 @@ jobs:
           fi
           echo "✅ Token généré avec succès"
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "NEW_PASS=$NEW_PASS" >> $GITHUB_ENV
+
 
 
 
@@ -98,22 +100,29 @@ jobs:
           mkdir -p sonarqube-reports
           
           # Attendre que l'analyse soit terminée
-          sleep 15
+          echo "⏳ Waiting for SonarQube analysis to complete..."
+          for i in {1..30}; do
+          STATUS=$(curl -s -u admin:$NEW_PASS "http://localhost:9000/api/ce/activity?component=my-flask-app" | jq -r '.tasks[0].status')
+          if [ "$STATUS" = "SUCCESS" ]; then
+          echo "✅ Analysis completed successfully."
+          break
+          fi
+          echo "Still in progress... ($i)"
+          sleep 10
+          done
           
-          # Télécharger les issues
-          curl -u admin:$NEW_PASS \
+          curl -u $SONAR_TOKEN: \
             "http://localhost:9000/api/issues/search?componentKeys=my-flask-app&ps=500" \
             -o sonarqube-reports/issues.json
           
-          # Télécharger les métriques
-          curl -u admin:$NEW_PASS \
+          curl -u $SONAR_TOKEN: \
             "http://localhost:9000/api/measures/component?component=my-flask-app&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,security_hotspots,ncloc,complexity" \
             -o sonarqube-reports/metrics.json
           
-          # Quality Gate
-          curl -u admin:$NEW_PASS \
+          curl -u $SONAR_TOKEN: \
             "http://localhost:9000/api/qualitygates/project_status?projectKey=my-flask-app" \
             -o sonarqube-reports/quality-gate.json
+
 
       - name: Generate HTML Report
         run: |
