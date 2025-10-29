@@ -54,19 +54,26 @@ jobs:
       - name: Setup SonarQube
         run: |
           echo "Configuring SonarQube admin user and project..."
-          curl -s -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=admin123"
-          curl -s -u admin:admin123 -X POST "http://localhost:9000/api/projects/create?name=my-flask-app&project=my-flask-app"
+          NEW_PASS="AdminPassword123!"
+
+          # Changer le mot de passe admin
+          curl -s -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=$NEW_PASS"
+
+          # Créer le projet
+          curl -s -u admin:$NEW_PASS -X POST "http://localhost:9000/api/projects/create?name=my-flask-app&project=my-flask-app"
 
           # Attendre que le projet soit bien créé
           sleep 5
 
-          TOKEN=$(curl -s -u admin:admin123 -X POST "http://localhost:9000/api/user_tokens/generate?name=github-actions" | jq -r .token)
+          # Générer un token
+          TOKEN=$(curl -s -u admin:$NEW_PASS -X POST "http://localhost:9000/api/user_tokens/generate?name=github-actions" | jq -r .token)
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
             echo "❌ Échec de la génération du token SonarQube"
             exit 1
           fi
           echo "✅ Token généré avec succès"
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
+      
       
 
       - name: Install SonarScanner
