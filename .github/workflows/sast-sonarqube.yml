@@ -38,23 +38,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Wait for SonarQube
+      - name: Wait for SonarQube to be ready
         run: |
-          echo "Waiting for SonarQube to be ready..."
-          timeout 300 bash -c 'until curl -s http://localhost:9000/api/system/status | grep -q "UP"; do sleep 5; done'
-          echo "SonarQube is ready!"
+          echo "Waiting for SonarQube to be fully initialized..."
+          for i in {1..60}; do
+            STATUS=$(curl -s http://localhost:9000/api/system/status | jq -r '.status')
+            if [ "$STATUS" = "UP" ]; then
+              echo "SonarQube is UP and ready!"
+              break
+            fi
+            echo "Still starting... ($i)"
+            sleep 5
+          done
 
       - name: Setup SonarQube
         run: |
-          # Changer le mot de passe admin
-          curl -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=admin123"
-          
-          # Créer le projet
-          curl -u admin:admin123 -X POST "http://localhost:9000/api/projects/create?name=my-flask-app&project=my-flask-app"
-          
-          # Générer un token
-          TOKEN=$(curl -u admin:admin123 -X POST "http://localhost:9000/api/user_tokens/generate?name=github-actions" | jq -r .token)
+          echo "Configuring SonarQube admin user and project..."
+          curl -s -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=admin123"
+          curl -s -u admin:admin123 -X POST "http://localhost:9000/api/projects/create?name=my-flask-app&project=my-flask-app"
+
+          # Attendre que le projet soit bien créé
+          sleep 5
+
+          TOKEN=$(curl -s -u admin:admin123 -X POST "http://localhost:9000/api/user_tokens/generate?name=github-actions" | jq -r .token)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "❌ Échec de la génération du token SonarQube"
+            exit 1
+          fi
+          echo "✅ Token généré avec succès"
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
+      
 
       - name: Install SonarScanner
         run: |
@@ -69,7 +82,7 @@ jobs:
             -Dsonar.projectName="My Flask App" \
             -Dsonar.sources=. \
             -Dsonar.host.url=http://localhost:9000 \
-            -Dsonar.login=${{ env.SONAR_TOKEN }} \
+            -Dsonar.token=${{ env.SONAR_TOKEN }}  \
             -Dsonar.python.version=3.11 \
             -Dsonar.exclusions="**/node_modules/**,**/__pycache__/**,.github/**"
 
